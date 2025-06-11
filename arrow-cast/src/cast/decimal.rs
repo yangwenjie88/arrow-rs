@@ -250,7 +250,11 @@ where
         }
     };
 
-    let integers = first_part.trim_start_matches('0');
+    let integers = if parts.len() == 1 && first_part.trim_start_matches('0').is_empty() && first_part.contains('0') {
+        "0"
+    } else {
+        first_part.trim_start_matches('0')
+    };
     let decimals = if parts.len() == 2 { parts[1] } else { "" };
 
     if !integers.is_empty() && !integers.as_bytes()[0].is_ascii_digit() {
@@ -570,4 +574,69 @@ where
     let array = array.as_primitive::<D>();
     let array = array.unary::<_, T>(op);
     Ok(Arc::new(array))
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+    use arrow_array::{ArrayRef, Decimal128Array, StringArray};
+    use arrow_schema::DataType;
+    use crate::cast;
+
+    #[test]
+    fn test_arrow_string_to_decimal_cast() {
+        let arr: ArrayRef = Arc::new(StringArray::from(vec![
+            Some("0"),
+            Some("0.12345"),
+            Some("123.456"),
+            Some("0.0000"),
+            Some("987"),
+            Some("-123"),
+            Some("abc"),
+            None,
+        ]));
+
+        let cast_type = DataType::Decimal128(30, 4);
+
+        let result = cast::cast(&arr, &cast_type);
+
+        match result {
+            Ok(array) => {
+                let dec_arr = array.as_any().downcast_ref::<Decimal128Array>().unwrap();
+                let arr: &dyn arrow_array::array::Array = dec_arr;
+                for i in 0..arr.len() {
+                    if arr.is_null(i) {
+                        println!("{}: NULL", i);
+                    } else {
+                        // 注意：value(i) 是整数，需要根据 scale 转成小数
+                        let raw = dec_arr.value(i);
+                        let scale = dec_arr.scale();
+                        // 打印原始整数和带小数点的字符串
+                        println!("{}: {} (as decimal: {})", i, raw, decimal_to_string(raw, scale));
+                    }
+                }
+
+                // 辅助函数：将 i128 和 scale 转成字符串
+                fn decimal_to_string(val: i128, scale: i8) -> String {
+                    if scale == 0 {
+                        return format!("{}", val);
+                    }
+                    let negative = val < 0;
+                    let mut val = val.abs().to_string();
+                    let scale = scale as usize;
+                    if val.len() <= scale {
+                        val = format!("{:0>width$}", val, width = scale + 1);
+                    }
+                    let (int_part, frac_part) = val.split_at(val.len() - scale);
+                    let s = format!("{}.{}", int_part, frac_part);
+                    if negative {
+                        format!("-{}", s)
+                    } else {
+                        s
+                    }
+                }
+            }
+            Err(e) => panic!("Cast failed: {:?}", e),
+        }
+    }
 }
