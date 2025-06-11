@@ -61,9 +61,7 @@ impl IntoBuffer for Vec<Int96> {
     fn into_buffer(self) -> Buffer {
         let mut builder = TimestampMicrosecondBufferBuilder::new(self.len());
         for v in self {
-            let (seconds, nanos) = v.to_seconds_and_nanos();
-            let micros = seconds * 1000000 + nanos / 1000;
-            builder.append(micros);
+            builder.append(v.to_nanos() / 1000)
         }
         builder.finish()
     }
